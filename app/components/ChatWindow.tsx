@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button"
 import { Send } from "lucide-react"
 
 interface Message {
-  id: number;
-  sender: 'AI' | 'Student';
+  role: "user" | "model";
   content: string;
+  latency?: number;
 }
 
 interface ChatWindowProps {
@@ -47,14 +47,14 @@ export function ChatWindow({ messages, onSendMessage, transcribedText, isPending
       <CardContent className="flex-grow overflow-hidden flex flex-col">
         <ScrollArea className="flex-grow pr-4 mb-4" ref={scrollAreaRef}>
           <div className="space-y-4">
-            {messages.map((message) => (
+            {messages.map((message, index) => (
               <div
-                key={message.id}
-                className={`flex ${message.sender === 'AI' ? 'justify-start' : 'justify-end'}`}
+                key={index}
+                className={`flex ${message.role === 'model' ? 'justify-start' : 'justify-end'}`}
               >
                 <div
                   className={`max-w-[70%] rounded-lg p-3 ${
-                    message.sender === 'AI'
+                    message.role === 'model'
                       ? 'bg-secondary text-secondary-foreground'
                       : 'bg-primary text-primary-foreground'
                   }`}

@@ -3,15 +3,13 @@
 import clsx from "clsx";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { EnterIcon, LoadingIcon } from "@/lib/icons";
 import { usePlayer } from "@/lib/usePlayer";
 import { track } from "@vercel/analytics";
 import { useMicVAD, utils } from "@ricky0123/vad-react";
 import ChatInterface from '@/components/ChatInterface'
-import { Chat } from "groq-sdk/resources/index.mjs";
 
 type Message = {
-    role: "user" | "model";
+    role: "user" | "model"; // Changed from "assistant" to "model"
     content: string;
     latency?: number;
 };
@@ -21,6 +19,7 @@ export default function Home() {
     const inputRef = useRef<HTMLInputElement>(null);
     const player = usePlayer();
     const [messages, setMessages] = useState<Message[]>([]);
+    const [sessionId, setSessionId] = useState<string | null>(null); // State to hold sessionId
 
     const vad = useMicVAD({
         startOnLoad: true,
@@ -75,8 +74,14 @@ export default function Home() {
                 track("Speech input");
             }
 
+            // Append existing messages
             for (const message of prevMessages) {
                 formData.append("message", JSON.stringify(message));
+            }
+
+            // Append sessionId if available
+            if (sessionId) {
+                formData.append("sessionId", sessionId);
             }
 
             const submittedAt = Date.now();
@@ -92,6 +97,7 @@ export default function Home() {
             const text = decodeURIComponent(
                 response.headers.get("X-Response") || ""
             );
+            const returnedSessionId = response.headers.get("X-Session-ID");
 
             if (!response.ok || !transcript || !text || !response.body) {
                 if (response.status === 429) {
@@ -101,6 +107,11 @@ export default function Home() {
                 }
 
                 return prevMessages;
+            }
+
+            // Capture and store sessionId
+            if (returnedSessionId) {
+                setSessionId(returnedSessionId);
             }
 
             const latency = Date.now() - submittedAt;
@@ -117,7 +128,7 @@ export default function Home() {
                     content: transcript,
                 },
                 {
-                    role: "model",
+                    role: "model", // Changed from "assistant" to "model"
                     content: text,
                     latency,
                 },

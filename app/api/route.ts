@@ -7,6 +7,7 @@ import { unstable_after as after } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import OpenAI from "openai";
 import { sessionManager, ChatMessage } from "./sessionManager"; // Adjust the path as needed
+import { v4 as uuidv4 } from 'uuid'; // Import uuid for unique request IDs
 
 // Initialize models once to reuse across requests
 const groq = new Groq();
@@ -30,7 +31,7 @@ const schema = zfd.formData({
     message: zfd.repeatableOfType(
         zfd.json(
             z.object({
-                role: z.enum(["user", "model"]), // Changed 'assistant' to 'model'
+                role: z.enum(["user", "model"]), // Updated roles
                 content: z.string(),
             })
         )
@@ -39,111 +40,148 @@ const schema = zfd.formData({
 });
 
 export async function POST(request: Request) {
+    const requestId = uuidv4(); // Generate a unique request ID
     const vercelId = request.headers.get("x-vercel-id") || "local";
-    console.time(`POST /api ${vercelId}`);
 
-    // Parse form data
-    const formData = await request.formData();
-    const { data, success } = schema.safeParse(formData);
-    if (!success) {
-        console.timeEnd(`POST /api ${vercelId}`);
-        return new Response("Invalid request", { status: 400 });
-    }
+    console.time(`POST /api ${requestId}`); // Unique label
 
-    // Extract sessionId if provided, else create a new session
-    let sessionId = data.sessionId;
-    let chatHistory: ChatMessage[] = [];
-
-    if (sessionId) {
-        const existingHistory = sessionManager.getSession(sessionId);
-        if (existingHistory) {
-            chatHistory = existingHistory;
-        } else {
-            // If sessionId is invalid, create a new session
-            sessionId = undefined;
+    try {
+        // Parse form data
+        const formData = await request.formData();
+        const { data, success } = schema.safeParse(formData);
+        if (!success) {
+            console.timeEnd(`POST /api ${requestId}`);
+            return new Response("Invalid request", { status: 400 });
         }
-    }
 
-    if (!sessionId) {
-        // Initialize with system prompt
-        chatHistory = [
-            { role: "user", content: "hi" },
-            {
-                role: "model", // Changed from 'assistant' to 'model'
-                content:
-                    "Understood. I'm ready to assist with the History of World Powers. How may I help you?",
+        // Extract sessionId if provided, else create a new session
+        let sessionId = data.sessionId;
+        let chatHistory: ChatMessage[] = [];
+
+        if (sessionId) {
+            const existingHistory = sessionManager.getSession(sessionId);
+            if (existingHistory) {
+                chatHistory = existingHistory;
+            } else {
+                // If sessionId is invalid, create a new session
+                sessionId = undefined;
+            }
+        }
+
+        if (!sessionId) {
+            // Initialize with system prompt
+            chatHistory = [
+                { role: "user", content: "hi" },
+                {
+                    role: "model",
+                    content:
+                        "Understood. I'm ready to assist with the History of World Powers. How may I help you?",
+                },
+            ];
+            sessionId = sessionManager.createSession(chatHistory);
+        }
+
+        // Start timing transcription
+        console.time(`transcribe ${requestId}`);
+
+        // Start parallel operations
+        const transcriptPromise = getTranscript(data.input);
+
+        // Fetch necessary headers once
+        const headersList = headers();
+        const locationData = location(headersList);
+        const currentTime = time(headersList);
+
+        // Wait for transcript
+        const transcript = await transcriptPromise;
+        if (!transcript) {
+            console.timeEnd(`transcribe ${requestId}`);
+            return new Response("Invalid audio", { status: 400 });
+        }
+        console.timeEnd(`transcribe ${requestId}`);
+
+        // Add user message to session
+        sessionManager.updateSession(sessionId, { role: "user", content: transcript });
+
+        // Count tokens for input (chat history + new message)
+        console.time(`countTokens ${requestId}`);
+        const countResult = await generativeModel.countTokens({
+            generateContentRequest: {
+                contents: chatHistory.map(msg => ({
+                    role: msg.role,
+                    parts: [{ text: msg.content }],
+                })),
             },
-        ];
-        sessionId = sessionManager.createSession(chatHistory);
+        });
+        console.timeEnd(`countTokens ${requestId}`);
+
+        // Log input tokens and character count
+        console.log(
+            `Request ${requestId} - Input: ${countResult.totalTokens} tokens, ${transcript.length} characters`
+        );
+
+        console.time(`text completion ${requestId}`);
+
+        // Start chat session
+        const chat = generativeModel.startChat({
+            history: chatHistory.map(msg => ({
+                role: msg.role,
+                parts: [{ text: msg.content }],
+            })),
+        });
+
+        // Send the new user message (transcript)
+        const result = await chat.sendMessage(transcript);
+        const responseText = result.response.text();
+
+        // Update session with model's response
+        sessionManager.updateSession(sessionId, { role: "model", content: responseText });
+
+        console.timeEnd(`text completion ${requestId}`);
+
+        // Extract token usage metadata
+        const { promptTokenCount, candidatesTokenCount, totalTokenCount } = result.response.usageMetadata || {};
+
+        console.log(
+            `Request ${requestId} - Text Completion: Input Tokens: ${promptTokenCount || 0}, Output Tokens: ${candidatesTokenCount || 0}, Total Tokens: ${totalTokenCount || 0}`
+        );
+        console.log(
+            `Request ${requestId} - Response: ${candidatesTokenCount || 0} tokens, ${responseText.length} characters`
+        );
+
+        console.time(`openai tts request ${requestId}`);
+
+        // Make a streaming request to OpenAI's TTS API
+        const ttsStream = await createTTSStream(responseText);
+
+        if (!ttsStream) {
+            console.timeEnd(`openai tts request ${requestId}`);
+            console.error(`Request ${requestId} - Voice synthesis failed`);
+            return new Response("Voice synthesis failed", { status: 500 });
+        }
+
+        console.timeEnd(`openai tts request ${requestId}`);
+
+        console.time(`stream ${requestId}`);
+        after(() => {
+            console.timeEnd(`stream ${requestId}`);
+        });
+
+        return new Response(ttsStream, {
+            headers: {
+                "Content-Type": "audio/mpeg",
+                "X-Transcript": encodeURIComponent(transcript),
+                "X-Response": encodeURIComponent(responseText),
+                "X-Location": encodeURIComponent(locationData),
+                "X-Time": encodeURIComponent(currentTime),
+                "X-Session-ID": sessionId, // Return session ID to client
+            },
+        });
+    } catch (error) {
+        console.timeEnd(`POST /api ${requestId}`);
+        console.error(`Request ${requestId} - Error:`, error);
+        return new Response("Internal Server Error", { status: 500 });
     }
-
-    // Start timing transcription
-    console.time(`transcribe ${vercelId}`);
-
-    // Start parallel operations
-    const transcriptPromise = getTranscript(data.input);
-
-    // Fetch necessary headers once
-    const headersList = headers();
-    const locationData = location(headersList);
-    const currentTime = time(headersList);
-
-    // Wait for transcript
-    const transcript = await transcriptPromise;
-    if (!transcript) {
-        console.timeEnd(`transcribe ${vercelId}`);
-        return new Response("Invalid audio", { status: 400 });
-    }
-    console.timeEnd(`transcribe ${vercelId}`);
-
-    // Add user message to session
-    sessionManager.updateSession(sessionId, { role: "user", content: transcript });
-
-    console.time(`text completion ${vercelId}`);
-
-    // Start chat session
-    const chat = generativeModel.startChat({
-        history: chatHistory.map(msg => ({
-            role: msg.role,
-            parts: [{ text: msg.content }],
-        })),
-    });
-
-    // Send the new user message (transcript)
-    const result = await chat.sendMessage(transcript);
-    const responseText = result.response.text();
-
-    // Update session with assistant's response
-    sessionManager.updateSession(sessionId, { role: "model", content: responseText }); // Changed from 'assistant' to 'model'
-
-    console.timeEnd(`text completion ${vercelId}`);
-    console.time(`openai tts request ${vercelId}`);
-
-    // Make a streaming request to OpenAI's TTS API
-    const ttsStream = await createTTSStream(responseText);
-
-    if (!ttsStream) {
-        console.timeEnd(`openai tts request ${vercelId}`);
-        console.error("Voice synthesis failed");
-        return new Response("Voice synthesis failed", { status: 500 });
-    }
-
-    console.timeEnd(`openai tts request ${vercelId}`);
-    console.time(`stream ${vercelId}`);
-    after(() => {
-        console.timeEnd(`stream ${vercelId}`);
-    });
-
-    return new Response(ttsStream, {
-        headers: {
-            "Content-Type": "audio/mpeg",
-            "X-Transcript": encodeURIComponent(transcript),
-            "X-Response": encodeURIComponent(responseText),
-            "X-Location": encodeURIComponent(locationData),
-            "X-Time": encodeURIComponent(currentTime),
-            "X-Session-ID": sessionId, // Return session ID to client
-        },
-    });
 }
 
 function location(headersList: Headers) {

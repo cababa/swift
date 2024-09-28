@@ -75,7 +75,7 @@ export async function POST(request: Request) {
                 {
                     role: "model",
                     content:
-                        "Understood. I'm ready to assist with the History of World Powers. How may I help you?",
+                        "hi",
                 },
             ];
             sessionId = sessionManager.createSession(chatHistory);

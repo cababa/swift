@@ -24,22 +24,19 @@ function HomeContent() {
     const vad = useMicVAD({
         startOnLoad: false,
         onSpeechEnd: async (audio) => {
-            if (isLiveTranscriptionActive) {
-                player.stop();
-                const wav = utils.encodeWAV(audio);
-                const blob = new Blob([wav], { type: "audio/wav" });
-                try {
-                    const response = await submit(blob);
-                    if (response && response.body) {
-                        player.play(response.body);
-                    }
-                } catch (error) {
-                    console.error("Error submitting audio:", error);
-                }
-                const isFirefox = navigator.userAgent.includes("Firefox");
-                if (isFirefox) vad.pause();
-            }
-        },
+			if (isLiveTranscriptionActive) {
+			  player.stop();
+			  const wav = utils.encodeWAV(audio);
+			  const blob = new Blob([wav], { type: "audio/wav" });
+			  try {
+				await submit(blob); // Removed response handling
+			  } catch (error) {
+				console.error("Error submitting audio:", error);
+			  }
+			  const isFirefox = navigator.userAgent.includes("Firefox");
+			  if (isFirefox) vad.pause();
+			}
+		  },
         workletURL: "/vad.worklet.bundle.min.js",
         modelURL: "/silero_vad.onnx",
         positiveSpeechThreshold: 0.6,

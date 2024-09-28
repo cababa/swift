@@ -38,40 +38,39 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const submit = async (data: string | Blob) => {
     setIsPending(true);
     const formData = new FormData();
-
+  
     if (typeof data === "string") {
       formData.append("input", data);
     } else {
       formData.append("input", data, "audio.wav");
     }
-
+  
     try {
       const response = await fetch("/api", {
         method: "POST",
         body: formData,
       });
-
+  
       const transcript = decodeURIComponent(
         response.headers.get("X-Transcript") || ""
       );
       const text = decodeURIComponent(
         response.headers.get("X-Response") || ""
       );
-
+  
       if (!response.ok || !transcript || !text || !response.body) {
         throw new Error("Invalid response");
       }
-
+  
       setTranscribedText(transcript);
-      // Only add the user message here, not in ChatWindow
       addMessage({ role: "user", content: transcript });
       addMessage({ role: "model", content: text });
-
-      // Play the audio response
+  
+      // Handle playback here
       player.play(response.body);
     } catch (error) {
       console.error("Error submitting message:", error);
-      // Handle error (e.g., show a toast message)
+      // Optionally, you can show a toast or some UI feedback
     } finally {
       setIsPending(false);
     }

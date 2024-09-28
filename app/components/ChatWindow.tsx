@@ -1,26 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Send } from "lucide-react"
+import { Send, Mic, MicOff } from "lucide-react"
+import { useChatContext } from './ChatContext'
+import ReactMarkdown from 'react-markdown'
 
-interface Message {
-  role: "user" | "model";
-  content: string;
-  latency?: number;
-}
-
-interface ChatWindowProps {
-  messages: Message[];
-  onSendMessage: (message: string) => void;
-  transcribedText: string;
-  isPending: boolean;
-}
-
-export function ChatWindow({ messages, onSendMessage, transcribedText, isPending }: ChatWindowProps) {
-  const [newMessage, setNewMessage] = useState(transcribedText)
+export function ChatWindow() {
+  const { 
+    messages, 
+    transcribedText, 
+    setTranscribedText, 
+    isPending,
+    isLiveTranscriptionActive,
+    toggleLiveTranscription,
+    submit
+  } = useChatContext()
+  const [newMessage, setNewMessage] = React.useState('')
   const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -32,10 +31,29 @@ export function ChatWindow({ messages, onSendMessage, transcribedText, isPending
     setNewMessage(transcribedText)
   }, [transcribedText])
 
-  const handleSendMessage = () => {
+  useEffect(() => {
+    if (!isLiveTranscriptionActive && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [isLiveTranscriptionActive])
+
+  const handleSendMessage = async () => {
     if (newMessage.trim()) {
-      onSendMessage(newMessage.trim())
+      const messageToSend = newMessage.trim()
       setNewMessage('')
+      setTranscribedText('')
+      await submit(messageToSend) // This will add the user message to the context
+    }
+  }
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewMessage(e.target.value)
+  }
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSendMessage()
     }
   }
 
@@ -59,7 +77,9 @@ export function ChatWindow({ messages, onSendMessage, transcribedText, isPending
                       : 'bg-primary text-primary-foreground'
                   }`}
                 >
-                  <p className="text-sm">{message.content}</p>
+                  <ReactMarkdown className="text-sm prose dark:prose-invert max-w-none">
+                    {message.content}
+                  </ReactMarkdown>
                 </div>
               </div>
             ))}
@@ -73,15 +93,39 @@ export function ChatWindow({ messages, onSendMessage, transcribedText, isPending
           </div>
         </ScrollArea>
         <div className="flex items-center gap-2">
-          <Input
-            placeholder="Type your message..."
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-          />
-          <Button onClick={handleSendMessage} disabled={isPending}>
-            <Send className="h-4 w-4" />
-          </Button>
+          <div className="relative flex-grow">
+            <Input
+              ref={inputRef}
+              placeholder="Type your message..."
+              value={newMessage}
+              onChange={handleInputChange}
+              onKeyPress={handleKeyPress}
+              disabled={isLiveTranscriptionActive || isPending}
+              className="pr-20"
+            />
+            <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex gap-1">
+              <Button 
+                onClick={handleSendMessage} 
+                disabled={isPending || !newMessage.trim()} 
+                size="icon"
+                className="p-2"
+              >
+                <Send className="h-4 w-4" />
+                <span className="sr-only">Send message</span>
+              </Button>
+              <Button 
+                onClick={toggleLiveTranscription} 
+                variant={isLiveTranscriptionActive ? "secondary" : "destructive"}
+                size="icon"
+                className={`transition-colors ${
+                    isLiveTranscriptionActive ? 'text-gray-500' : 'bg-red-500 hover:bg-red-600'
+                }`}
+                aria-label={isLiveTranscriptionActive ? "Turn off live transcription" : "Turn on live transcription"}
+              >
+                {isLiveTranscriptionActive ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>

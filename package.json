@@ -29,6 +29,7 @@
 		"openai": "^4.63.0",
 		"react": "19.0.0-rc-100dfd7dab-20240701",
 		"react-dom": "19.0.0-rc-100dfd7dab-20240701",
+		"react-markdown": "^9.0.1",
 		"sonner": "^1.4.41",
 		"tailwind-merge": "^2.5.2",
 		"tailwindcss-animate": "^1.0.7",

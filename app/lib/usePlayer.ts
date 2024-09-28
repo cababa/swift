@@ -6,7 +6,7 @@ export function usePlayer() {
     const audioBuffer = useRef<AudioBuffer | null>(null);
     const source = useRef<AudioBufferSourceNode | null>(null);
 
-    async function play(stream: ReadableStream, callback: () => void) {
+    async function play(stream: ReadableStream, callback: () => void = () => {}) {
         try {
             stop();
             audioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)();

@@ -1,35 +1,44 @@
 "use client";
 
 import clsx from "clsx";
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { usePlayer } from "@/lib/usePlayer";
 import { track } from "@vercel/analytics";
 import { useMicVAD, utils } from "@ricky0123/vad-react";
 import ChatInterface from '@/components/ChatInterface'
+import { ChatProvider, useChatContext } from '@/components/ChatContext'
 
-type Message = {
-    role: "user" | "model"; // Changed from "assistant" to "model"
-    content: string;
-    latency?: number;
-};
-
-export default function Home() {
-    const [input, setInput] = useState("");
+function HomeContent() {
+    const { 
+        setTranscribedText, 
+        addMessage, 
+        setIsPending, 
+        isLiveTranscriptionActive, 
+        toggleLiveTranscription,
+        submit
+    } = useChatContext();
     const inputRef = useRef<HTMLInputElement>(null);
     const player = usePlayer();
-    const [messages, setMessages] = useState<Message[]>([]);
-    const [sessionId, setSessionId] = useState<string | null>(null); // State to hold sessionId
 
     const vad = useMicVAD({
-        startOnLoad: true,
-        onSpeechEnd: (audio) => {
-            player.stop();
-            const wav = utils.encodeWAV(audio);
-            const blob = new Blob([wav], { type: "audio/wav" });
-            submit(blob);
-            const isFirefox = navigator.userAgent.includes("Firefox");
-            if (isFirefox) vad.pause();
+        startOnLoad: false,
+        onSpeechEnd: async (audio) => {
+            if (isLiveTranscriptionActive) {
+                player.stop();
+                const wav = utils.encodeWAV(audio);
+                const blob = new Blob([wav], { type: "audio/wav" });
+                try {
+                    const response = await submit(blob);
+                    if (response && response.body) {
+                        player.play(response.body);
+                    }
+                } catch (error) {
+                    console.error("Error submitting audio:", error);
+                }
+                const isFirefox = navigator.userAgent.includes("Firefox");
+                if (isFirefox) vad.pause();
+            }
         },
         workletURL: "/vad.worklet.bundle.min.js",
         modelURL: "/silero_vad.onnx",
@@ -54,106 +63,18 @@ export default function Home() {
     });
 
     useEffect(() => {
-        function keyDown(e: KeyboardEvent) {
-            if (e.key === "Escape") return setInput("");
+        if (isLiveTranscriptionActive) {
+            vad.start();
+        } else {
+            vad.pause();
         }
-
-        window.addEventListener("keydown", keyDown);
-        return () => window.removeEventListener("keydown", keyDown);
-    }, []);
-
-    const [, submit, isPending] = useActionState<Message[], string | Blob>(
-        async (prevMessages, data) => {
-            const formData = new FormData();
-
-            if (typeof data === "string") {
-                formData.append("input", data);
-                track("Text input");
-            } else {
-                formData.append("input", data, "audio.wav");
-                track("Speech input");
-            }
-
-            // Append existing messages
-            for (const message of prevMessages) {
-                formData.append("message", JSON.stringify(message));
-            }
-
-            // Append sessionId if available
-            if (sessionId) {
-                formData.append("sessionId", sessionId);
-            }
-
-            const submittedAt = Date.now();
-
-            const response = await fetch("/api", {
-                method: "POST",
-                body: formData,
-            });
-
-            const transcript = decodeURIComponent(
-                response.headers.get("X-Transcript") || ""
-            );
-            const text = decodeURIComponent(
-                response.headers.get("X-Response") || ""
-            );
-            const returnedSessionId = response.headers.get("X-Session-ID");
-
-            if (!response.ok || !transcript || !text || !response.body) {
-                if (response.status === 429) {
-                    toast.error("Too many requests. Please try again later.");
-                } else {
-                    toast.error((await response.text()) || "An error occurred.");
-                }
-
-                return prevMessages;
-            }
-
-            // Capture and store sessionId
-            if (returnedSessionId) {
-                setSessionId(returnedSessionId);
-            }
-
-            const latency = Date.now() - submittedAt;
-            player.play(response.body, () => {
-                const isFirefox = navigator.userAgent.includes("Firefox");
-                if (isFirefox) vad.start();
-            });
-            setInput(transcript);
-
-            const newMessages: Message[] = [
-                ...prevMessages,
-                {
-                    role: "user",
-                    content: transcript,
-                },
-                {
-                    role: "model", // Changed from "assistant" to "model"
-                    content: text,
-                    latency,
-                },
-            ];
-            setMessages(newMessages);
-            return newMessages;
-        },
-        []
-    );
-
-    function handleSendMessage(message: string) {
-        setMessages(prevMessages => [...prevMessages, { role: "user", content: message }]);
-        submit(message);
-    }
+    }, [isLiveTranscriptionActive, vad]);
 
     return (
         <>
             <div className="pb-4 min-h-28" />
 
-            <ChatInterface 
-                onSendMessage={handleSendMessage} 
-                transcribedText={input} 
-                isPending={isPending}
-                messages={messages}
-            />
+            <ChatInterface />
 
             <div
                 className={clsx(
@@ -170,11 +91,10 @@ export default function Home() {
     );
 }
 
-function A(props: any) {
+export default function Home() {
     return (
-        <a
-            {...props}
-            className="text-neutral-500 dark:text-neutral-500 hover:underline font-medium"
-        />
+        <ChatProvider>
+            <HomeContent />
+        </ChatProvider>
     );
 }

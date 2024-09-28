@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+// ChatContext.tsx
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { usePlayer } from "@/lib/usePlayer";
 
 interface Message {
@@ -25,7 +26,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [transcribedText, setTranscribedText] = useState('');
   const [isPending, setIsPending] = useState(false);
   const [isLiveTranscriptionActive, setIsLiveTranscriptionActive] = useState(false);
+  const [sessionId, setSessionId] = useState<string | undefined>(() => {
+    // Initialize sessionId from localStorage if available
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('sessionId') || undefined;
+    }
+    return undefined;
+  });
   const player = usePlayer();
+
+  useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem('sessionId', sessionId);
+    } else {
+      localStorage.removeItem('sessionId');
+    }
+  }, [sessionId]);
 
   const addMessage = (message: Message) => {
     setMessages((prevMessages) => [...prevMessages, message]);
@@ -38,39 +54,46 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const submit = async (data: string | Blob) => {
     setIsPending(true);
     const formData = new FormData();
-  
+
+    if (sessionId) {
+      formData.append("sessionId", sessionId);
+    }
+
     if (typeof data === "string") {
       formData.append("input", data);
     } else {
       formData.append("input", data, "audio.wav");
     }
-  
+
     try {
       const response = await fetch("/api", {
         method: "POST",
         body: formData,
       });
-  
+
+      const newSessionId = response.headers.get("X-Session-ID");
+      if (newSessionId) {
+        setSessionId(newSessionId);
+      }
+
       const transcript = decodeURIComponent(
         response.headers.get("X-Transcript") || ""
       );
       const text = decodeURIComponent(
         response.headers.get("X-Response") || ""
       );
-  
+
       if (!response.ok || !transcript || !text || !response.body) {
         throw new Error("Invalid response");
       }
-  
+
       setTranscribedText(transcript);
       addMessage({ role: "user", content: transcript });
       addMessage({ role: "model", content: text });
-  
-      // Handle playback here
+
       player.play(response.body);
     } catch (error) {
       console.error("Error submitting message:", error);
-      // Optionally, you can show a toast or some UI feedback
     } finally {
       setIsPending(false);
     }

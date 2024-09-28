@@ -16,7 +16,7 @@ const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Pre-configure the generative model
 const modelConfig = {
-    model: "gemini-1.5-flash",
+    model: "gemini-1.5-pro",
     systemInstruction: process.env.KETZAI_PROMPT,
     generationConfig: {
         candidateCount: 1,
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
                 {
                     role: "model",
                     content:
-                        "hi",
+                        "Hello! I'm here to assist you with your queries. How can I help you today?",
                 },
             ];
             sessionId = sessionManager.createSession(chatHistory);

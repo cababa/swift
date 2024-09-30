@@ -7,7 +7,9 @@ import { unstable_after as after } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import OpenAI from "openai";
 import { sessionManager, ChatMessage } from "./sessionManager"; // Adjust the path as needed
-import { v4 as uuidv4 } from 'uuid'; // Import uuid for unique request IDs
+import { v4 as uuidv4 } from 'uuid';
+import { calculateGeminiCost, calculateWhisperCost, calculateTTSCost } from '../utils/pricing'; // Adjust path
+import { parseBuffer } from 'music-metadata';
 
 // Initialize models once to reuse across requests
 const groq = new Groq();
@@ -93,12 +95,15 @@ export async function POST(request: Request) {
         const currentTime = time(headersList);
 
         // Wait for transcript
-        const transcript = await transcriptPromise;
+        const { transcript, durationSeconds } = await transcriptPromise;
         if (!transcript) {
             console.timeEnd(`transcribe ${requestId}`);
             return new Response("Invalid audio", { status: 400 });
         }
         console.timeEnd(`transcribe ${requestId}`);
+
+        // Calculate Whisper cost
+        const { whisperHours, whisperCost } = calculateWhisperCost(durationSeconds);
 
         // Add user message to session
         sessionManager.updateSession(sessionId, { role: "user", content: transcript });
@@ -149,6 +154,15 @@ export async function POST(request: Request) {
             `Request ${requestId} - Response: ${candidatesTokenCount || 0} tokens, ${responseText.length} characters`
         );
 
+        // Calculate LLM costs
+        const { llmInputCost, llmOutputCost, llmTotalCost } = calculateGeminiCost(
+            promptTokenCount || 0,
+            candidatesTokenCount || 0
+        );
+
+        // Calculate TTS cost
+        const { ttsCharacters, ttsCost } = calculateTTSCost(responseText.length);
+
         console.time(`openai tts request ${requestId}`);
 
         // Make a streaming request to OpenAI's TTS API
@@ -161,6 +175,29 @@ export async function POST(request: Request) {
         }
 
         console.timeEnd(`openai tts request ${requestId}`);
+
+        // Calculate total cost
+        const totalCost = llmTotalCost + whisperCost + ttsCost;
+
+        // Collect all cost data
+        const costData = {
+            llmInputTokens: promptTokenCount || 0,
+            llmOutputTokens: candidatesTokenCount || 0,
+            llmInputCost,
+            llmOutputCost,
+            llmTotalCost,
+            whisperDurationSeconds: durationSeconds,
+            whisperHours,
+            whisperCost,
+            ttsCharacters,
+            ttsCost,
+            totalCost,
+        };
+
+        console.log(`Request ${requestId} - Cost Data: `, costData);
+
+        // Encode costData as JSON and set in headers
+        const costDataHeader = encodeURIComponent(JSON.stringify(costData));
 
         console.time(`stream ${requestId}`);
         after(() => {
@@ -175,6 +212,7 @@ export async function POST(request: Request) {
                 "X-Location": encodeURIComponent(locationData),
                 "X-Time": encodeURIComponent(currentTime),
                 "X-Session-ID": sessionId, // Return session ID to client
+                "X-Cost-Data": costDataHeader, // Include cost data
             },
         });
     } catch (error) {
@@ -200,18 +238,27 @@ function time(headersList: Headers) {
     });
 }
 
-async function getTranscript(input: string | File): Promise<string | null> {
-    if (typeof input === "string") return input;
+async function getTranscript(input: string | File): Promise<{ transcript: string | null; durationSeconds: number }> {
+    if (typeof input === "string") return { transcript: input, durationSeconds: 0 };
 
     try {
+        // Read the file buffer
+        const arrayBuffer = await input.arrayBuffer();
+        const bufferUint8 = new Uint8Array(arrayBuffer);
+
+        // Parse metadata to get duration
+        const metadata = await parseBuffer(bufferUint8, input.type, { duration: true });
+        const durationSeconds = metadata.format.duration || 0;
+
         const { text } = await groq.audio.transcriptions.create({
             file: input,
             model: "whisper-large-v3",
         });
 
-        return text.trim() || null;
-    } catch {
-        return null; // Empty or invalid audio file
+        return { transcript: text.trim() || null, durationSeconds };
+    } catch (error) {
+        console.error("Error in getTranscript:", error);
+        return { transcript: null, durationSeconds: 0 }; // Empty or invalid audio file
     }
 }
 

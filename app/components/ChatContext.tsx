@@ -7,6 +7,20 @@ interface Message {
   content: string;
 }
 
+interface CostData {
+  llmInputTokens: number;
+  llmOutputTokens: number;
+  llmInputCost: number;
+  llmOutputCost: number;
+  llmTotalCost: number;
+  whisperDurationSeconds: number;
+  whisperHours: number;
+  whisperCost: number;
+  ttsCharacters: number;
+  ttsCost: number;
+  totalCost: number;
+}
+
 interface ChatContextType {
   messages: Message[];
   addMessage: (message: Message) => void;
@@ -17,6 +31,8 @@ interface ChatContextType {
   isLiveTranscriptionActive: boolean;
   toggleLiveTranscription: () => void;
   submit: (data: string | Blob) => Promise<void>;
+  costData: CostData | null;
+  setCostData: (data: CostData | null) => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -33,6 +49,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     return undefined;
   });
+  const [costData, setCostData] = useState<CostData | null>(null);
   const player = usePlayer();
 
   useEffect(() => {
@@ -83,6 +100,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         response.headers.get("X-Response") || ""
       );
 
+      // Extract cost data
+      const costDataHeader = response.headers.get("X-Cost-Data");
+      let costData: CostData | null = null;
+      if (costDataHeader) {
+        try {
+          costData = JSON.parse(decodeURIComponent(costDataHeader));
+        } catch (error) {
+          console.error("Error parsing cost data:", error);
+        }
+      }
+
       if (!response.ok || !transcript || !text || !response.body) {
         throw new Error("Invalid response");
       }
@@ -90,6 +118,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setTranscribedText(transcript);
       addMessage({ role: "user", content: transcript });
       addMessage({ role: "model", content: text });
+
+      // Update cost data
+      setCostData(costData);
 
       player.play(response.body);
     } catch (error) {
@@ -111,6 +142,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         isLiveTranscriptionActive,
         toggleLiveTranscription,
         submit,
+        costData,
+        setCostData,
       }}
     >
       {children}

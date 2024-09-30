@@ -8,6 +8,7 @@ import { track } from "@vercel/analytics";
 import { useMicVAD, utils } from "@ricky0123/vad-react";
 import ChatInterface from '@/components/ChatInterface'
 import { ChatProvider, useChatContext } from '@/components/ChatContext'
+import React from "react";
 
 function HomeContent() {
     const { 

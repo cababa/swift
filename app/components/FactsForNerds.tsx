@@ -1,43 +1,19 @@
-import { useState, useEffect } from 'react'
+// FactsForNerds.tsx
+import { useChatContext } from './ChatContext'
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Input } from "@/components/ui/input"
+import { useState } from 'react'
 
 export function FactsForNerds() {
-  const [inputTokens, setInputTokens] = useState(0)
-  const [outputTokens, setOutputTokens] = useState(0)
-  const [totalTokens, setTotalTokens] = useState(0)
-  const [llmPrice, setLlmPrice] = useState(0)
-  const [ttsPrice, setTtsPrice] = useState(0)
-  const [whisperPrice, setWhisperPrice] = useState(0)
-  const [totalPrice, setTotalPrice] = useState(0)
-  const [responseTime, setResponseTime] = useState(0)
+  const { costData, setCostData } = useChatContext()
+
   const [systemInstructions, setSystemInstructions] = useState(
     "You are a helpful AI assistant. Answer questions accurately and concisely."
   )
   const [temperature, setTemperature] = useState(0.7)
-
-  // Simulating live updates
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setInputTokens(prev => prev + Math.floor(Math.random() * 10))
-      setOutputTokens(prev => prev + Math.floor(Math.random() * 20))
-      setLlmPrice(prev => prev + Math.random() * 0.0005)
-      setTtsPrice(prev => prev + Math.random() * 0.0002)
-      setWhisperPrice(prev => prev + Math.random() * 0.0001)
-      setResponseTime(prev => prev + Math.random() * 0.1)
-    }, 1000)
-
-    return () => clearInterval(interval)
-  }, [])
-
-  // Calculate derived values
-  useEffect(() => {
-    setTotalTokens(inputTokens + outputTokens)
-    setTotalPrice(llmPrice + ttsPrice + whisperPrice)
-  }, [inputTokens, outputTokens, llmPrice, ttsPrice, whisperPrice])
 
   return (
     <Card className="w-full lg:w-96">
@@ -46,37 +22,56 @@ export function FactsForNerds() {
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="grid grid-cols-2 gap-4">
+          {/* Gemini LLM */}
           <div>
             <Label>Input Tokens</Label>
-            <p className="text-2xl font-bold">{Math.floor(inputTokens)}</p>
+            <p className="text-2xl font-bold">{costData ? Math.floor(costData.llmInputTokens) : 0}</p>
           </div>
           <div>
             <Label>Output Tokens</Label>
-            <p className="text-2xl font-bold">{Math.floor(outputTokens)}</p>
+            <p className="text-2xl font-bold">{costData ? Math.floor(costData.llmOutputTokens) : 0}</p>
           </div>
           <div>
             <Label>Total Tokens</Label>
-            <p className="text-2xl font-bold">{Math.floor(totalTokens)}</p>
+            <p className="text-2xl font-bold">{costData ? Math.floor(costData.llmInputTokens + costData.llmOutputTokens) : 0}</p>
           </div>
           <div>
-            <Label>LLM Price</Label>
-            <p className="text-2xl font-bold">${llmPrice.toFixed(4)}</p>
+            <Label>LLM Input Cost</Label>
+            <p className="text-2xl font-bold">${costData ? costData.llmInputCost.toFixed(6) : "0.000000"}</p>
           </div>
           <div>
-            <Label>TTS Price</Label>
-            <p className="text-2xl font-bold">${ttsPrice.toFixed(4)}</p>
+            <Label>LLM Output Cost</Label>
+            <p className="text-2xl font-bold">${costData ? costData.llmOutputCost.toFixed(6) : "0.000000"}</p>
           </div>
           <div>
-            <Label>Whisper Price</Label>
-            <p className="text-2xl font-bold">${whisperPrice.toFixed(4)}</p>
+            <Label>LLM Total Cost</Label>
+            <p className="text-2xl font-bold">${costData ? costData.llmTotalCost.toFixed(6) : "0.000000"}</p>
           </div>
+
+          {/* Whisper STT */}
+          <div>
+            <Label>Whisper Duration</Label>
+            <p className="text-2xl font-bold">{costData ? costData.whisperDurationSeconds.toFixed(2) : 0} s</p>
+          </div>
+          <div>
+            <Label>Whisper Cost</Label>
+            <p className="text-2xl font-bold">${costData ? costData.whisperCost.toFixed(6) : "0.000000"}</p>
+          </div>
+
+          {/* OpenAI TTS */}
+          <div>
+            <Label>TTS Characters</Label>
+            <p className="text-2xl font-bold">{costData ? costData.ttsCharacters : 0}</p>
+          </div>
+          <div>
+            <Label>TTS Cost</Label>
+            <p className="text-2xl font-bold">${costData ? costData.ttsCost.toFixed(6) : "0.000000"}</p>
+          </div>
+
+          {/* Total Cost */}
           <div>
             <Label>Total Price</Label>
-            <p className="text-2xl font-bold">${totalPrice.toFixed(4)}</p>
-          </div>
-          <div>
-            <Label>Response Time</Label>
-            <p className="text-2xl font-bold">{responseTime.toFixed(2)}s</p>
+            <p className="text-2xl font-bold">${costData ? costData.totalCost.toFixed(6) : "0.000000"}</p>
           </div>
         </div>
         <Separator />

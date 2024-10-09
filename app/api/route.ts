@@ -211,7 +211,7 @@ export async function POST(request: Request) {
                 "X-Response": encodeURIComponent(responseText),
                 "X-Location": encodeURIComponent(locationData),
                 "X-Time": encodeURIComponent(currentTime),
-                "X-Session-ID": sessionId, // Return session ID to client
+                "X-Session-ID": sessionId,
                 "X-Cost-Data": costDataHeader, // Include cost data
             },
         });
@@ -221,6 +221,7 @@ export async function POST(request: Request) {
         return new Response("Internal Server Error", { status: 500 });
     }
 }
+
 
 function location(headersList: Headers) {
     const country = headersList.get("x-vercel-ip-country");

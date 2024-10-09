@@ -1,6 +1,9 @@
-// ChatContext.tsx
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+// app/components/ChatContext.tsx
+
+import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { usePlayer } from "@/lib/usePlayer";
+import { toast } from "sonner";
+import debounce from 'lodash.debounce';
 
 interface Message {
   role: 'user' | 'model';
@@ -43,7 +46,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [isPending, setIsPending] = useState(false);
   const [isLiveTranscriptionActive, setIsLiveTranscriptionActive] = useState(false);
   const [sessionId, setSessionId] = useState<string | undefined>(() => {
-    // Initialize sessionId from localStorage if available
     if (typeof window !== 'undefined') {
       return localStorage.getItem('sessionId') || undefined;
     }
@@ -66,6 +68,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const toggleLiveTranscription = () => {
     setIsLiveTranscriptionActive((prev) => !prev);
+  };
+
+  const debouncedSubmit = useRef(
+    debounce(async (data: string | Blob) => {
+      await submit(data);
+    }, 300)
+  ).current;
+
+  const handleSubmit = (data: string | Blob): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      debouncedSubmit(data);
+      resolve();
+    });
   };
 
   const submit = async (data: string | Blob) => {
@@ -102,16 +117,40 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
       // Extract cost data
       const costDataHeader = response.headers.get("X-Cost-Data");
-      let costData: CostData | null = null;
+      let newCostData: CostData | null = null;
       if (costDataHeader) {
         try {
-          costData = JSON.parse(decodeURIComponent(costDataHeader));
+          newCostData = JSON.parse(decodeURIComponent(costDataHeader));
         } catch (error) {
           console.error("Error parsing cost data:", error);
         }
       }
 
-      if (!response.ok || !transcript || !text || !response.body) {
+      // Update cost data with accumulation logic
+      setCostData((prevCostData) => {
+        if (!newCostData) return prevCostData; // If no new data, return previous data
+        // If there is no previous cost data, simply set the new data
+        if (!prevCostData) return newCostData;
+        // Accumulate the new costs onto the previous costs
+        return {
+          llmInputTokens: prevCostData.llmInputTokens + newCostData.llmInputTokens,
+          llmOutputTokens: prevCostData.llmOutputTokens + newCostData.llmOutputTokens,
+          llmInputCost: prevCostData.llmInputCost + newCostData.llmInputCost,
+          llmOutputCost: prevCostData.llmOutputCost + newCostData.llmOutputCost,
+          llmTotalCost: prevCostData.llmTotalCost + newCostData.llmTotalCost,
+          whisperDurationSeconds: prevCostData.whisperDurationSeconds + newCostData.whisperDurationSeconds,
+          whisperHours: prevCostData.whisperHours + newCostData.whisperHours,
+          whisperCost: prevCostData.whisperCost + newCostData.whisperCost,
+          ttsCharacters: prevCostData.ttsCharacters + newCostData.ttsCharacters,
+          ttsCost: prevCostData.ttsCost + newCostData.ttsCost,
+          totalCost: prevCostData.totalCost + newCostData.totalCost,
+        };
+      });
+
+      // Check if TTS failed
+      const ttsFailed = response.headers.get("X-TTS-Failed") === "true";
+
+      if (!response.ok || !transcript || !text) {
         throw new Error("Invalid response");
       }
 
@@ -119,12 +158,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       addMessage({ role: "user", content: transcript });
       addMessage({ role: "model", content: text });
 
-      // Update cost data
-      setCostData(costData);
-
-      player.play(response.body);
+      if (!ttsFailed && response.body) {
+        player.play(response.body);
+      } else {
+        console.warn("TTS playback failed. Using client-side TTS as a fallback.");
+        toast.error("Audio playback is unavailable. Using your browser's speech synthesis.");
+        if ('speechSynthesis' in window) {
+          const utterance = new SpeechSynthesisUtterance(text);
+          window.speechSynthesis.speak(utterance);
+        } else {
+          console.warn("Speech Synthesis API not supported in this browser.");
+        }
+      }
     } catch (error) {
       console.error("Error submitting message:", error);
+      toast.error("An error occurred while processing your request.");
     } finally {
       setIsPending(false);
     }
@@ -141,7 +189,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setIsPending,
         isLiveTranscriptionActive,
         toggleLiveTranscription,
-        submit,
+        submit: handleSubmit,
         costData,
         setCostData,
       }}

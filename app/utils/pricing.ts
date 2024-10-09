@@ -1,4 +1,4 @@
-// utils/pricing.ts
+// app/utils/pricing.ts
 
 export const PRICING = {
     gemini: {
